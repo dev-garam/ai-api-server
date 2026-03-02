@@ -64,11 +64,19 @@
 - `GET /api/v1/chat/sessions/:sessionId/messages` (채팅 메시지 목록 조회)
 - `POST /api/v1/chat/sessions/:sessionId/messages` (메시지 전송 및 답변 저장)
 - `POST /api/v1/chat/sessions/:sessionId/messages/stream` (SSE 스트리밍 응답)
-- `POST /api/v1/interpreting/translate` (현재 미구현: 501)
-- `POST /api/v1/interpreting/semantic-units/split` (현재 미구현: 501)
 
 ## 기본 처리 흐름
 
-- 기본 기능은 `사용자 요청 -> 도메인 서버 -> (티켓 발급) -> ai-api-server -> node-agent-server(intent detect) -> ai-api-server 응답 생성` 흐름을 따릅니다.
-- 채팅 API는 intent 결과를 바탕으로 서버가 응답을 구성하고, 일반/스트리밍(SSE) 형태로 반환합니다.
+- 기본 기능은 `사용자 요청 -> 도메인 서버 -> (티켓 발급) -> ai-api-server -> node-agent-server(답변 생성) -> ai-api-server 저장/중계` 흐름을 목표로 합니다.
+- 현재 API 서버는 우선 `AGENT_CHAT_REPLY_PATH`를 호출하고, 에이전트가 미구현(404/405/501)인 경우에만 `intent detect`로 폴백합니다.
+- 채팅 API는 agent 응답을 일반/스트리밍(SSE) 형태로 반환합니다.
 - 서비스 인증은 `x-key-id/x-timestamp/x-nonce/x-signature` 기반 HMAC 검증을 지원합니다.
+
+## Agent 연동 환경변수
+
+- `AGENT_SERVER_HOST` (예: `http://localhost:8889`)
+- `AGENT_CHAT_REPLY_PATH` (기본: `/api/v1/chat/reply`)
+- `AGENT_INTENT_DETECT_PATH` (폴백용, 기본: `/api/v1/intent/detect`)
+- `AGENT_HMAC_ENABLED` (`true`/`false`)
+- `AGENT_HMAC_KEY_ID` (요청 헤더 `x-key-id`)
+- `AGENT_HMAC_SECRET` (요청 서명용 secret)

@@ -35,7 +35,6 @@ async function bootstrap() {
     .addTag('인증', '유저 티켓 발급 및 refresh token 재발급')
     .addTag('내부 인증(약식)', 'x-internal-api-key 기반 임시 서버 간 인증')
     .addTag('채팅 세션', '세션 기반 채팅 요청 및 SSE 스트리밍 응답')
-    .addTag('통역', '번역 및 의미 단위 분리 API')
     .build();
   const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup('api-docs', app, swaggerDocument);

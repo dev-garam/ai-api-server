@@ -36,3 +36,29 @@ export interface AgentIntentDetectResponse {
     title: string;
   } | null;
 }
+
+export interface AgentGenerateReplyRequest {
+  session: {
+    id: string;
+    userId: string;
+    tenantId?: string;
+    serviceId?: string;
+  };
+  state: {
+    messages: AgentInStateChatMessage[];
+    viewerTimezone?: string;
+    imageDescription?: string;
+    userMemory?: AgentUserMemory[];
+  };
+}
+
+export interface AgentGenerateReplyResponse {
+  answer: string;
+  modelName?: string;
+  finishReason?: string;
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
+}

@@ -2,7 +2,10 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { ChatMessageRole } from '@prisma/client';
 import { PrismaService } from '../../shared/database/prisma.service';
 import { AgentServerService } from '../../shared/agent-server/agent-server.service';
-import { AgentInStateChatMessage } from '../../shared/agent-server/agent-server.types';
+import {
+  AgentGenerateReplyRequest,
+  AgentInStateChatMessage,
+} from '../../shared/agent-server/agent-server.types';
 import { AuthUser } from '../../common/interfaces/auth-user.interface';
 import {
   ChatSessionResponseDto,
@@ -104,7 +107,7 @@ export class ChatService {
       },
     });
 
-    const assistantResult = await this.buildAssistantResponseFromIntent(sessionId);
+    const assistantResult = await this.buildAssistantResponse(authUser, sessionId);
 
     const assistantMessage = await this.prismaService.chatMessage.create({
       data: {
@@ -186,7 +189,8 @@ export class ChatService {
     };
   }
 
-  private async buildAssistantResponseFromIntent(
+  private async buildAssistantResponse(
+    authUser: AuthUser,
     sessionId: string,
   ): Promise<{ answer: string; modelName?: string }> {
     const recentMessages = await this.prismaService.chatMessage.findMany({
@@ -195,7 +199,30 @@ export class ChatService {
       take: 20,
     });
 
-    const stateMessages: AgentInStateChatMessage[] = recentMessages
+    const payload: AgentGenerateReplyRequest = {
+      session: {
+        id: sessionId,
+        userId: authUser.userId,
+        tenantId: authUser.tenantId,
+        serviceId: authUser.serviceId,
+      },
+      state: {
+        messages: this.toAgentStateMessages(recentMessages),
+      },
+    };
+
+    const agentReply = await this.agentServerService.generateReply(payload);
+
+    return {
+      answer: agentReply.answer,
+      modelName: agentReply.modelName,
+    };
+  }
+
+  private toAgentStateMessages(
+    messages: Array<{ role: ChatMessageRole; content: string }>,
+  ): AgentInStateChatMessage[] {
+    return messages
       .map((item) => {
         if (item.role === ChatMessageRole.USER) {
           return { role: 'user', content: item.content };
@@ -206,23 +233,5 @@ export class ChatService {
         return null;
       })
       .filter((item): item is AgentInStateChatMessage => item !== null);
-
-    const intent = await this.agentServerService.detectIntent({
-      state: {
-        messages: stateMessages,
-      },
-    });
-
-    const featureId = intent.parsed.featureId;
-    const featureTitle = intent.matchedFeature?.title ?? '알 수 없음';
-    const reasoning = intent.parsed.reasoning ?? 'reasoning 없음';
-
-    // Phase-1: intent detection 기반 임시 응답 포맷.
-    const answer = `intent:${featureId} | title:${featureTitle} | reasoning:${reasoning}`;
-
-    return {
-      answer,
-      modelName: 'intent-detect',
-    };
   }
 }

@@ -67,7 +67,7 @@ export class ChatStreamEndEventDto {
   @ApiProperty({ example: 'cm8msg-assistant' })
   messageId!: string;
 
-  @ApiProperty({ example: 'intent:weather.lookup | title:날씨 조회 | reasoning:...' })
+  @ApiProperty({ example: '오늘 서울 날씨는 맑고 최고 12도, 최저 3도입니다.' })
   fullText!: string;
 
   @ApiProperty({ required: false, example: 'openai:gpt-4o-mini' })

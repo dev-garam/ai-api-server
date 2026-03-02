@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ChatMessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model AiModel {
+  id         String   @id @default(cuid())
+  name       String
+  provider   String
+  isDefault  Boolean  @default(false)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model InterpretingUsage {
+  id                String   @id @default(cuid())
+  tenantId          String?
+  userId            String?
+  sourceLanguage    String
+  targetLanguages   String[]
+  inputTokens       Int      @default(0)
+  outputTokens      Int      @default(0)
+  cachedTokens      Int      @default(0)
+  createdAt         DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model TtsUsage {
+  id                String   @id @default(cuid())
+  tenantId          String?
+  userId            String?
+  modelName         String
+  voice             String?
+  inputChars        Int      @default(0)
+  createdAt         DateTime @default(now())
+
+  @@index([tenantId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model ChatSession {
+  id         String        @id @default(cuid())
+  tenantId   String?
+  userId     String
+  title      String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  messages   ChatMessage[]
+
+  @@index([tenantId, userId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model ChatMessage {
+  id         String          @id @default(cuid())
+  sessionId  String
+  role       ChatMessageRole
+  content    String
+  modelName  String?
+  createdAt  DateTime        @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+}

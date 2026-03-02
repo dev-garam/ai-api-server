@@ -13,6 +13,7 @@ import { AuthUser } from '../interfaces/auth-user.interface';
 interface AccessTokenPayload {
   sub: string;
   tenantId?: string;
+  serviceId?: string;
   scopes?: string[];
   tokenType: 'access' | 'refresh';
   jti: string;
@@ -67,6 +68,7 @@ export class UserAccessTokenGuard implements CanActivate {
     request.user = {
       userId: decoded.sub,
       tenantId: decoded.tenantId,
+      serviceId: decoded.serviceId,
       scopes: decoded.scopes ?? [],
       tokenType: 'access',
       jti: decoded.jti,

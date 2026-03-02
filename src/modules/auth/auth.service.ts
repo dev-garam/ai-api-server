@@ -3,11 +3,18 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { sign, verify } from 'jsonwebtoken';
 import { RedisService } from '../../shared/redis/redis.service';
+import { PrismaService } from '../../shared/database/prisma.service';
+import { AuthServicePrincipal } from '../../common/interfaces/auth-service.interface';
 import { IssueUserTicketRequestDto, TokenPairResponseDto } from './dtos/issue-user-ticket.dto';
+import {
+  ServiceTokenIssueRequestDto,
+  ServiceTokenIssueResponseDto,
+} from './dtos/service-token.dto';
 
 interface RefreshTokenPayload {
   sub: string;
   tenantId?: string;
+  serviceId?: string;
   scopes?: string[];
   tokenType: 'refresh';
   jti: string;
@@ -20,10 +27,33 @@ export class AuthService {
   constructor(
     private readonly configService: ConfigService,
     private readonly redisService: RedisService,
+    private readonly prismaService: PrismaService,
   ) {}
 
   async issueUserTicket(dto: IssueUserTicketRequestDto): Promise<TokenPairResponseDto> {
     return this.createTokenPair(dto.userId, dto.tenantId, dto.scopes ?? []);
+  }
+
+  async issueServiceUserToken(
+    serviceAuth: AuthServicePrincipal,
+    dto: ServiceTokenIssueRequestDto,
+  ): Promise<ServiceTokenIssueResponseDto> {
+    const identity = await this.findOrCreateIdentity(serviceAuth, dto);
+    const tokenPair = await this.createTokenPair(
+      identity.userId,
+      dto.tenantId ?? identity.tenantId ?? undefined,
+      dto.scopes ?? [],
+      serviceAuth.serviceId,
+    );
+
+    return {
+      ...tokenPair,
+      user: {
+        userId: identity.userId,
+        externalUserId: identity.externalUserId,
+        tenantId: dto.tenantId ?? identity.tenantId ?? undefined,
+      },
+    };
   }
 
   async refresh(refreshToken: string): Promise<TokenPairResponseDto> {
@@ -40,13 +70,19 @@ export class AuthService {
     }
 
     await this.redisService.del(key);
-    return this.createTokenPair(decoded.sub, decoded.tenantId, decoded.scopes ?? []);
+    return this.createTokenPair(
+      decoded.sub,
+      decoded.tenantId,
+      decoded.scopes ?? [],
+      decoded.serviceId,
+    );
   }
 
   private async createTokenPair(
     userId: string,
     tenantId: string | undefined,
     scopes: string[],
+    serviceId?: string,
   ): Promise<TokenPairResponseDto> {
     const secret = this.getJwtSecret();
     const issuer = this.configService.get<string>('JWT_ISSUER') ?? 'ai-api-server';
@@ -64,6 +100,7 @@ export class AuthService {
       {
         sub: userId,
         tenantId,
+        serviceId,
         scopes,
         tokenType: 'access',
         jti: randomUUID(),
@@ -79,6 +116,7 @@ export class AuthService {
       {
         sub: userId,
         tenantId,
+        serviceId,
         scopes,
         tokenType: 'refresh',
         jti: refreshJti,
@@ -93,7 +131,7 @@ export class AuthService {
     await this.redisService.setEx(
       this.getRefreshStoreKey(refreshJti),
       refreshExpiresInSec,
-      JSON.stringify({ userId, tenantId, scopes }),
+      JSON.stringify({ userId, tenantId, scopes, serviceId }),
     );
 
     return {
@@ -115,6 +153,85 @@ export class AuthService {
 
   private getRefreshStoreKey(jti: string): string {
     return `auth:refresh:${jti}`;
+  }
+
+  private async findOrCreateIdentity(
+    serviceAuth: AuthServicePrincipal,
+    dto: ServiceTokenIssueRequestDto,
+  ): Promise<{ userId: string; externalUserId: string; tenantId?: string | null }> {
+    const existing = await this.prismaService.userIdentity.findUnique({
+      where: {
+        serviceId_externalUserId: {
+          serviceId: serviceAuth.serviceId,
+          externalUserId: dto.externalUserId,
+        },
+      },
+    });
+    if (existing) {
+      if (existing.deletedAt !== null) {
+        const restoredUser = await this.prismaService.user.upsert({
+          where: { id: existing.userId },
+          update: {
+            deletedAt: null,
+            displayName: dto.displayName,
+          },
+          create: {
+            id: existing.userId,
+            displayName: dto.displayName,
+          },
+        });
+        const restoredIdentity = await this.prismaService.userIdentity.update({
+          where: { id: existing.id },
+          data: {
+            deletedAt: null,
+            tenantId: dto.tenantId ?? existing.tenantId,
+          },
+        });
+        return {
+          userId: restoredUser.id,
+          externalUserId: restoredIdentity.externalUserId,
+          tenantId: restoredIdentity.tenantId,
+        };
+      }
+
+      if (dto.displayName && dto.displayName.length > 0) {
+        await this.prismaService.user.update({
+          where: { id: existing.userId },
+          data: { displayName: dto.displayName, deletedAt: null },
+        });
+      }
+      if (dto.tenantId && dto.tenantId !== existing.tenantId) {
+        const updated = await this.prismaService.userIdentity.update({
+          where: { id: existing.id },
+          data: { tenantId: dto.tenantId },
+        });
+        return updated;
+      }
+      return existing;
+    }
+
+    const created = await this.prismaService.user.create({
+      data: {
+        displayName: dto.displayName,
+        identities: {
+          create: {
+            serviceId: serviceAuth.serviceId,
+            externalUserId: dto.externalUserId,
+            tenantId: dto.tenantId,
+          },
+        },
+      },
+      include: {
+        identities: true,
+      },
+    });
+
+    const identity = created.identities[0];
+    return {
+      userId: identity.userId,
+      externalUserId: identity.externalUserId,
+      tenantId: identity.tenantId,
+    };
   }
 
   private isRefreshPayload(payload: unknown): payload is RefreshTokenPayload {

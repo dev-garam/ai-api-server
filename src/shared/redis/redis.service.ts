@@ -32,6 +32,12 @@ export class RedisService implements OnModuleDestroy {
     await this.client.set(key, value, 'EX', seconds);
   }
 
+  async setNxEx(key: string, seconds: number, value: string): Promise<boolean> {
+    await this.ensureConnected();
+    const result = await this.client.set(key, value, 'EX', seconds, 'NX');
+    return result === 'OK';
+  }
+
   async get(key: string): Promise<string | null> {
     await this.ensureConnected();
     return this.client.get(key);

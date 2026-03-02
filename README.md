@@ -21,6 +21,7 @@
 - 독립성: 배포/스케일링/장애 격리를 메인 서비스와 분리
 - 확장성: 기능 단위 모듈화로 신규 AI 기능을 점진적으로 추가
 - 호환성: 기존 `api-server`와 연계 가능하지만 강한 종속은 피함
+- 삭제 정책: 도메인 데이터는 hard delete 없이 soft delete(`deletedAt`)를 사용
 
 ## 연동 모델 (MSA)
 
@@ -55,6 +56,7 @@
 - `GET /api/v1/health/liveness`
 - `GET /api/v1/health/readiness`
 - `GET /api/v1/internal/auth/check` (약식 인증 검증)
+- `POST /api/v1/auth/service/token` (서비스 HMAC 인증 + 유저 토큰 발급)
 - `POST /api/v1/auth/tickets` (internal key 기반 유저 티켓 발급)
 - `POST /api/v1/auth/refresh` (refresh token 재발급)
 - `POST /api/v1/chat/sessions` (채팅 세션 생성)
@@ -69,3 +71,4 @@
 
 - 기본 기능은 `사용자 요청 -> 도메인 서버 -> (티켓 발급) -> ai-api-server -> node-agent-server(intent detect) -> ai-api-server 응답 생성` 흐름을 따릅니다.
 - 채팅 API는 intent 결과를 바탕으로 서버가 응답을 구성하고, 일반/스트리밍(SSE) 형태로 반환합니다.
+- 서비스 인증은 `x-key-id/x-timestamp/x-nonce/x-signature` 기반 HMAC 검증을 지원합니다.

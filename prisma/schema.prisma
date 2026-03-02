@@ -13,6 +13,17 @@ enum ChatMessageRole {
   SYSTEM
 }
 
+enum ServiceStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum CredentialStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
 model AiModel {
   id         String   @id @default(cuid())
   name       String
@@ -21,6 +32,7 @@ model AiModel {
   isActive   Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+  deletedAt  DateTime?
 }
 
 model InterpretingUsage {
@@ -33,6 +45,7 @@ model InterpretingUsage {
   outputTokens      Int      @default(0)
   cachedTokens      Int      @default(0)
   createdAt         DateTime @default(now())
+  deletedAt         DateTime?
 
   @@index([tenantId, createdAt])
   @@index([userId, createdAt])
@@ -46,21 +59,26 @@ model TtsUsage {
   voice             String?
   inputChars        Int      @default(0)
   createdAt         DateTime @default(now())
+  deletedAt         DateTime?
 
   @@index([tenantId, createdAt])
   @@index([userId, createdAt])
 }
 
 model ChatSession {
-  id         String        @id @default(cuid())
-  tenantId   String?
-  userId     String
-  title      String?
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
-  messages   ChatMessage[]
+  id          String        @id @default(cuid())
+  tenantId    String?
+  serviceId   String?
+  userId      String
+  title       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+  messages    ChatMessage[]
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  service     ServiceApp?   @relation(fields: [serviceId], references: [id], onDelete: SetNull)
 
-  @@index([tenantId, userId, createdAt])
+  @@index([tenantId, serviceId, userId, createdAt])
   @@index([userId, createdAt])
 }
 
@@ -71,8 +89,65 @@ model ChatMessage {
   content    String
   modelName  String?
   createdAt  DateTime        @default(now())
+  deletedAt  DateTime?
 
   session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
+}
+
+model ServiceApp {
+  id           String              @id @default(cuid())
+  code         String              @unique
+  name         String
+  status       ServiceStatus       @default(ACTIVE)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  deletedAt    DateTime?
+  credentials  ServiceCredential[]
+  identities   UserIdentity[]
+  chatSessions ChatSession[]
+}
+
+model ServiceCredential {
+  id         String           @id @default(cuid())
+  serviceId  String
+  keyId      String           @unique
+  secret     String
+  status     CredentialStatus @default(ACTIVE)
+  createdAt  DateTime         @default(now())
+  expiresAt  DateTime?
+  lastUsedAt DateTime?
+  deletedAt  DateTime?
+
+  service ServiceApp @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([serviceId, status])
+}
+
+model User {
+  id          String        @id @default(cuid())
+  displayName String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+  identities  UserIdentity[]
+  sessions    ChatSession[]
+}
+
+model UserIdentity {
+  id             String      @id @default(cuid())
+  serviceId      String
+  userId         String
+  externalUserId String
+  tenantId       String?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  deletedAt      DateTime?
+
+  service ServiceApp @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  user    User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([serviceId, externalUserId])
+  @@index([userId])
 }

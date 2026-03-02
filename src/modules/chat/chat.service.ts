@@ -30,6 +30,7 @@ export class ChatService {
     const session = await this.prismaService.chatSession.create({
       data: {
         tenantId: authUser.tenantId,
+        serviceId: authUser.serviceId,
         userId: authUser.userId,
         title: dto.title,
       },
@@ -49,10 +50,15 @@ export class ChatService {
     const session = await this.prismaService.chatSession.findUnique({
       where: { id: sessionId },
     });
-    if (!session) {
+    if (!session || session.deletedAt !== null) {
       throw new NotFoundException('채팅 세션을 찾을 수 없습니다.');
     }
-    this.assertSessionOwner(authUser, session.userId, session.tenantId ?? undefined);
+    this.assertSessionOwner(
+      authUser,
+      session.userId,
+      session.tenantId ?? undefined,
+      session.serviceId ?? undefined,
+    );
 
     return {
       id: session.id,
@@ -73,7 +79,7 @@ export class ChatService {
     const limit = query.limit ?? 30;
 
     const messages = await this.prismaService.chatMessage.findMany({
-      where: { sessionId },
+      where: { sessionId, deletedAt: null },
       orderBy: { createdAt: 'asc' },
       take: limit,
     });
@@ -132,24 +138,33 @@ export class ChatService {
   private async ensureSessionOwner(authUser: AuthUser, sessionId: string): Promise<void> {
     const session = await this.prismaService.chatSession.findUnique({
       where: { id: sessionId },
-      select: { id: true, userId: true, tenantId: true },
+      select: { id: true, userId: true, tenantId: true, serviceId: true, deletedAt: true },
     });
-    if (!session) {
+    if (!session || session.deletedAt !== null) {
       throw new NotFoundException('채팅 세션을 찾을 수 없습니다.');
     }
-    this.assertSessionOwner(authUser, session.userId, session.tenantId ?? undefined);
+    this.assertSessionOwner(
+      authUser,
+      session.userId,
+      session.tenantId ?? undefined,
+      session.serviceId ?? undefined,
+    );
   }
 
   private assertSessionOwner(
     authUser: AuthUser,
     sessionUserId: string,
     sessionTenantId: string | undefined,
+    sessionServiceId: string | undefined,
   ): void {
     if (authUser.userId !== sessionUserId) {
       throw new ForbiddenException('다른 사용자의 채팅 세션에는 접근할 수 없습니다.');
     }
     if ((authUser.tenantId ?? '') !== (sessionTenantId ?? '')) {
       throw new ForbiddenException('다른 테넌트의 채팅 세션에는 접근할 수 없습니다.');
+    }
+    if ((authUser.serviceId ?? '') !== (sessionServiceId ?? '')) {
+      throw new ForbiddenException('다른 서비스의 채팅 세션에는 접근할 수 없습니다.');
     }
   }
 
@@ -175,7 +190,7 @@ export class ChatService {
     sessionId: string,
   ): Promise<{ answer: string; modelName?: string }> {
     const recentMessages = await this.prismaService.chatMessage.findMany({
-      where: { sessionId },
+      where: { sessionId, deletedAt: null },
       orderBy: { createdAt: 'asc' },
       take: 20,
     });

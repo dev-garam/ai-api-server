@@ -45,4 +45,7 @@ prisma/dev.db-journal
 
 # Local docs / analysis artifacts
 API_SERVER_ANALYSIS.md
+
+# Private collaboration notes (assistant <-> user)
+.codex-ops/
 node_modules

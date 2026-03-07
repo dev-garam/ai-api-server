@@ -80,4 +80,12 @@ export class AuthController {
   refresh(@Body() dto: RefreshTokenRequestDto): Promise<TokenPairResponseDto> {
     return this.authService.refresh(dto.refreshToken);
   }
+
+  @Post('dev/token')
+  @Public()
+  @ApiOperation({ summary: '로컬 개발용 토큰 즉시 발급 (NODE_ENV=local + LOCAL_AUTH_BYPASS=true)' })
+  @ApiResponse({ status: 201, type: TokenPairResponseDto })
+  issueDevToken(@Body() dto: IssueUserTicketRequestDto): Promise<TokenPairResponseDto> {
+    return this.authService.issueDevUserTicket(dto);
+  }
 }

@@ -1,10 +1,11 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { sign, verify } from 'jsonwebtoken';
 import { RedisService } from '../../shared/redis/redis.service';
 import { PrismaService } from '../../shared/database/prisma.service';
 import { AuthServicePrincipal } from '../../common/interfaces/auth-service.interface';
+import { isLocalAuthBypassEnabled } from '../../common/utils/local-auth.util';
 import { IssueUserTicketRequestDto, TokenPairResponseDto } from './dtos/issue-user-ticket.dto';
 import {
   ServiceTokenIssueRequestDto,
@@ -18,6 +19,7 @@ interface RefreshTokenPayload {
   scopes?: string[];
   tokenType: 'refresh';
   jti: string;
+  localDevToken?: boolean;
   iat: number;
   exp: number;
 }
@@ -32,6 +34,18 @@ export class AuthService {
 
   async issueUserTicket(dto: IssueUserTicketRequestDto): Promise<TokenPairResponseDto> {
     return this.createTokenPair(dto.userId, dto.tenantId, dto.scopes ?? []);
+  }
+
+  async issueDevUserTicket(dto: IssueUserTicketRequestDto): Promise<TokenPairResponseDto> {
+    if (!isLocalAuthBypassEnabled(this.configService)) {
+      throw new ForbiddenException(
+        'dev token endpoint는 NODE_ENV=local 및 LOCAL_AUTH_BYPASS=true 에서만 사용할 수 있습니다.',
+      );
+    }
+    return this.createTokenPair(dto.userId, dto.tenantId, dto.scopes ?? [], undefined, {
+      localDevToken: true,
+      persistRefreshToken: false,
+    });
   }
 
   async issueServiceUserToken(
@@ -63,6 +77,22 @@ export class AuthService {
       throw new UnauthorizedException('유효하지 않은 refresh token입니다.');
     }
 
+    if (decoded.localDevToken === true) {
+      if (!isLocalAuthBypassEnabled(this.configService)) {
+        throw new UnauthorizedException('local dev token refresh는 로컬 개발 모드에서만 허용됩니다.');
+      }
+      return this.createTokenPair(
+        decoded.sub,
+        decoded.tenantId,
+        decoded.scopes ?? [],
+        decoded.serviceId,
+        {
+          localDevToken: true,
+          persistRefreshToken: false,
+        },
+      );
+    }
+
     const key = this.getRefreshStoreKey(decoded.jti);
     const stored = await this.redisService.get(key);
     if (!stored) {
@@ -83,6 +113,10 @@ export class AuthService {
     tenantId: string | undefined,
     scopes: string[],
     serviceId?: string,
+    options?: {
+      localDevToken?: boolean;
+      persistRefreshToken?: boolean;
+    },
   ): Promise<TokenPairResponseDto> {
     const secret = this.getJwtSecret();
     const issuer = this.configService.get<string>('JWT_ISSUER') ?? 'ai-api-server';
@@ -95,6 +129,7 @@ export class AuthService {
       this.configService.get<string>('REFRESH_TOKEN_EXPIRES_IN') ?? '7d',
     );
     const refreshJti = randomUUID();
+    const localDevToken = options?.localDevToken === true;
 
     const accessToken = sign(
       {
@@ -104,6 +139,7 @@ export class AuthService {
         scopes,
         tokenType: 'access',
         jti: randomUUID(),
+        localDevToken,
       },
       secret,
       {
@@ -120,6 +156,7 @@ export class AuthService {
         scopes,
         tokenType: 'refresh',
         jti: refreshJti,
+        localDevToken,
       },
       secret,
       {
@@ -128,11 +165,13 @@ export class AuthService {
       },
     );
 
-    await this.redisService.setEx(
-      this.getRefreshStoreKey(refreshJti),
-      refreshExpiresInSec,
-      JSON.stringify({ userId, tenantId, scopes, serviceId }),
-    );
+    if (options?.persistRefreshToken !== false) {
+      await this.redisService.setEx(
+        this.getRefreshStoreKey(refreshJti),
+        refreshExpiresInSec,
+        JSON.stringify({ userId, tenantId, scopes, serviceId }),
+      );
+    }
 
     return {
       accessToken,

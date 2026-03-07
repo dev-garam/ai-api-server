@@ -50,26 +50,24 @@ export class ChatMessageListResponseDto {
   messages!: ChatMessageItemDto[];
 }
 
-export class ChatStreamStartEventDto {
-  @ApiProperty({ example: 'cm8msg-start' })
-  messageId!: string;
+export class ChatStreamEventDto {
+  @ApiProperty({
+    example: 'message.delta',
+    enum: ['message.start', 'message.delta', 'message.end', 'intent.result', 'intent.error', 'done', 'error'],
+  })
+  type!:
+    | 'message.start'
+    | 'message.delta'
+    | 'message.end'
+    | 'intent.result'
+    | 'intent.error'
+    | 'done'
+    | 'error';
 
-  @ApiProperty({ example: 'cm8session' })
-  sessionId!: string;
-}
-
-export class ChatStreamDeltaEventDto {
-  @ApiProperty({ example: '안녕하세요 ' })
-  text!: string;
-}
-
-export class ChatStreamEndEventDto {
-  @ApiProperty({ example: 'cm8msg-assistant' })
-  messageId!: string;
-
-  @ApiProperty({ example: '오늘 서울 날씨는 맑고 최고 12도, 최저 3도입니다.' })
-  fullText!: string;
-
-  @ApiProperty({ required: false, example: 'openai:gpt-4o-mini' })
-  modelName?: string;
+  @ApiProperty({
+    example: { text: '안녕하세요' },
+    description: '이벤트별 payload. upstream agent event 형식을 그대로 전달합니다.',
+    additionalProperties: true,
+  })
+  data!: Record<string, unknown>;
 }

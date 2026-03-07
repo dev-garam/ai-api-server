@@ -1,11 +1,16 @@
 import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { isLocalAuthBypassEnabled } from '../utils/local-auth.util';
 
 @Injectable()
 export class InternalApiKeyGuard implements CanActivate {
   constructor(private readonly configService: ConfigService) {}
 
   canActivate(context: ExecutionContext): boolean {
+    if (isLocalAuthBypassEnabled(this.configService)) {
+      return true;
+    }
+
     const request = context.switchToHttp().getRequest<{ headers: Record<string, string | undefined> }>();
     const expected = this.configService.get<string>('INTERNAL_API_KEY');
 

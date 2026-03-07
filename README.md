@@ -1,81 +1,148 @@
 # AI API Server
 
-`ai-api-server`는 특정 서비스에 종속되지 않는 범용 AI 기능 서버입니다.  
+`ai-api-server`는 NestJS 기반의 범용 AI 애플리케이션 서버입니다.  
+도메인 서버와 별도의 추론 런타임인 `node-agent-server` 사이에서
+인증, 오케스트레이션, 대화 저장, 응답 중계를 담당합니다.
 
-## 목적
+## 이 서버가 담당하는 것
 
-- 공통 AI 기능을 독립 서비스로 분리
-- 기존/신규 서버에서 재사용 가능한 표준 연동 지점 제공
-- 도메인 서버와 AI 처리 로직의 결합도 최소화
+- 외부 및 서비스 연동용 HTTP API 제공
+- 인증 및 토큰 발급
+- 채팅 세션/메시지 저장
+- 제품 레벨 AI 오케스트레이션
+- agent 호출용 context 조립
 
-## 서비스 포지셔닝
+이 서버는 채팅 히스토리와 제품이 소유해야 하는 대화 상태의 source of truth입니다.
 
-- 이 프로젝트는 "메인 API 서버"가 아니라 "AI 기능 전용 서버"입니다.
-- 다른 서버는 이 모듈을 선택적으로 연결해 AI 기능을 확장합니다.
-- 연결 대상은 단일 제품이 아닌, 복수의 서비스/서버를 전제로 합니다.
+## 이 서버가 담당하지 않는 것
 
-## 설계 원칙
+- 모델별 추론 세부 구현
+- provider별 프롬프트 실행 런타임
+- 별도 agent 런타임 자체의 소유와 운영 책임
 
-- 범용성: 특정 제품/디바이스 정책을 기본값으로 두지 않음
-- 독립성: 배포/스케일링/장애 격리를 메인 서비스와 분리
-- 확장성: 기능 단위 모듈화로 신규 AI 기능을 점진적으로 추가
-- 호환성: 기존 `api-server`와 연계 가능하지만 강한 종속은 피함
-- 삭제 정책: 도메인 데이터는 hard delete 없이 soft delete(`deletedAt`)를 사용
+이 영역은 `node-agent-server` 또는 별도 추론 컴포넌트의 책임으로 둡니다.
 
-## 연동 모델 (MSA)
+## `node-agent-server`와의 경계
 
-- 각 도메인 서버는 필요 기능만 `ai-api-server` API로 호출
-- 인증/권한/트래픽 제어는 서버 간 통신 기준으로 관리
-- 장애 전파를 줄이기 위해 타임아웃, 재시도, 서킷브레이커 등 적용 권장
+- 원본 대화 히스토리는 `ai-api-server`가 저장합니다.
+- 사용자 메모리, 세션 summary 등 제품 레벨 대화 상태도 `ai-api-server`가 소유합니다.
+- `node-agent-server`는 명시적으로 전달받은 context를 바탕으로 추론하는 모듈로 취급합니다.
+- `node-agent-server`가 원본 대화나 제품 상태의 source of truth가 되지 않도록 유지합니다.
 
-## 범위
+의도하는 흐름은 아래와 같습니다.
 
-- 포함:
-  - AI 관련 처리 API
-  - 서버 간 연동을 위한 인터페이스
-  - 공통 운영/모니터링 고려 구조
-- 제외:
-  - 특정 서비스 전용 정책 하드코딩
-  - 마이그레이션 이력/절차 문서
+`client/domain server -> ai-api-server -> node-agent-server -> ai-api-server -> client`
 
-## 참고
-
-- 상위의 기존 통합 API 프로젝트: `../api-server`
-- 본 저장소는 위 프로젝트를 참고하되, 범용 AI 모듈로 독립 운영하는 것을 목표로 합니다.
-
-## 인증 정책 (초기)
-
-- 게이트웨이/정식 S2S 인증 설계 전까지는 `Lite Internal Auth + User Ticket`로 운영합니다.
-- 신뢰 서버는 `x-internal-api-key`로 유저 티켓을 발급받습니다.
-- 기능 API 호출은 `Authorization: Bearer <accessToken>`을 사용합니다.
-- access token 만료 시 refresh token으로 재발급합니다.
-
-## 1차 API
+## 현재 API 범위
 
 - `GET /api/v1/health/liveness`
 - `GET /api/v1/health/readiness`
-- `GET /api/v1/internal/auth/check` (약식 인증 검증)
-- `POST /api/v1/auth/service/token` (서비스 HMAC 인증 + 유저 토큰 발급)
-- `POST /api/v1/auth/tickets` (internal key 기반 유저 티켓 발급)
-- `POST /api/v1/auth/refresh` (refresh token 재발급)
-- `POST /api/v1/chat/sessions` (채팅 세션 생성)
-- `GET /api/v1/chat/sessions/:sessionId` (채팅 세션 조회)
-- `GET /api/v1/chat/sessions/:sessionId/messages` (채팅 메시지 목록 조회)
-- `POST /api/v1/chat/sessions/:sessionId/messages` (메시지 전송 및 답변 저장)
-- `POST /api/v1/chat/sessions/:sessionId/messages/stream` (SSE 스트리밍 응답)
+- `GET /api/v1/internal/auth/check`
+- `POST /api/v1/auth/service/token`
+- `POST /api/v1/auth/tickets`
+- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/dev/token`
+- `POST /api/v1/chat/sessions`
+- `GET /api/v1/chat/sessions/:sessionId`
+- `GET /api/v1/chat/sessions/:sessionId/messages`
+- `POST /api/v1/chat/sessions/:sessionId/messages`
+- `POST /api/v1/chat/sessions/:sessionId/messages/stream`
 
-## 기본 처리 흐름
+Swagger 문서는 실행 중인 서버의 `/api-docs`에서 확인할 수 있습니다.
 
-- 기본 기능은 `사용자 요청 -> 도메인 서버 -> (티켓 발급) -> ai-api-server -> node-agent-server(답변 생성) -> ai-api-server 저장/중계` 흐름을 목표로 합니다.
-- 현재 API 서버는 우선 `AGENT_CHAT_REPLY_PATH`를 호출하고, 에이전트가 미구현(404/405/501)인 경우에만 `intent detect`로 폴백합니다.
-- 채팅 API는 agent 응답을 일반/스트리밍(SSE) 형태로 반환합니다.
-- 서비스 인증은 `x-key-id/x-timestamp/x-nonce/x-signature` 기반 HMAC 검증을 지원합니다.
+## 인증
 
-## Agent 연동 환경변수
+현재 기본 인증 구조는 `Lite Internal Auth + User Ticket`입니다.
 
-- `AGENT_SERVER_HOST` (예: `http://localhost:8889`)
-- `AGENT_CHAT_REPLY_PATH` (기본: `/api/v1/chat/reply`)
-- `AGENT_INTENT_DETECT_PATH` (폴백용, 기본: `/api/v1/intent/detect`)
-- `AGENT_HMAC_ENABLED` (`true`/`false`)
-- `AGENT_HMAC_KEY_ID` (요청 헤더 `x-key-id`)
-- `AGENT_HMAC_SECRET` (요청 서명용 secret)
+- 신뢰된 서버는 유저 티켓을 발급받을 수 있습니다.
+- 기능 API는 `Authorization: Bearer <accessToken>` 방식으로 호출합니다.
+- access token 만료 시 refresh token으로 재발급합니다.
+
+공개용 인증 계약 초안은 아래 문서를 참고합니다.  
+[AUTH_API_CONTRACT.md](/Users/dev-garam/workspace/ai-api-server/AUTH_API_CONTRACT.md)
+
+## 로컬 개발
+
+### 준비물
+
+- Node.js
+- PostgreSQL
+- Redis
+- 접근 가능한 `node-agent-server`
+
+### 환경변수
+
+아래 파일을 기준으로 시작합니다.  
+[.env.example](/Users/dev-garam/workspace/ai-api-server/.env.example)
+
+주요 환경변수:
+
+- `PORT`
+- `DATABASE_URL`
+- `REDIS_URL`
+- `JWT_SECRET`
+- `INTERNAL_API_KEY`
+- `AGENT_SERVER_HOST`
+- `AGENT_CHAT_REPLY_PATH`
+- `AGENT_INTENT_DETECT_PATH`
+- `AGENT_DEFAULT_MODEL`
+- `AGENT_HMAC_ENABLED`
+- `AGENT_HMAC_KEY_ID`
+- `AGENT_HMAC_SECRET`
+
+### 실행
+
+```bash
+npm install
+npm run prisma:generate
+npm run start:dev
+```
+
+## 로컬 인증 우회
+
+로컬 테스트 전용으로 아래 값을 설정할 수 있습니다.
+
+- `NODE_ENV=local`
+- `LOCAL_AUTH_BYPASS=true`
+
+이 모드가 활성화되면:
+
+- `POST /api/v1/auth/dev/token`으로 내부 키나 HMAC 없이 개발용 JWT를 발급할 수 있습니다.
+- 해당 개발 토큰으로 호출한 채팅 API는 DB 대신 메모리 저장소를 사용합니다.
+- 해당 개발 토큰의 refresh 재발급은 Redis 기반 refresh 저장소를 사용하지 않습니다.
+- `x-dev-user-id`, `x-dev-tenant-id`, `x-dev-service-id`, `x-dev-scopes` 헤더로 로컬 사용자 컨텍스트를 덮어쓸 수 있습니다.
+
+이 모드는 로컬 개발 전용이며, 로컬 환경 외에서는 활성화하지 않는 것을 전제로 합니다.
+
+## Agent 연동
+
+`ai-api-server`는 내부 HTTP로 `node-agent-server`를 호출합니다.
+
+현재 동작 방식:
+
+- `chat/reply`를 우선 호출합니다.
+- `chat/reply`가 `404`, `405`, `501`을 반환하면 임시로 `intent/detect`로 폴백합니다.
+- 서버 간 요청 서명은 HMAC 헤더 기반입니다.
+
+## 기술 스택
+
+- NestJS
+- Prisma
+- PostgreSQL
+- Redis
+- Axios
+- Swagger
+
+## 범위
+
+포함:
+
+- 여러 제품/서비스에서 재사용 가능한 AI API
+- 인증 및 서비스 연동 인터페이스
+- 채팅 세션 저장과 오케스트레이션
+
+제외:
+
+- 특정 제품 전용 정책 하드코딩
+- 마이그레이션 이력 문서화
+- 추론 런타임 자체 소유

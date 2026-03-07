@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Post, Query, Res } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiConsumes,
@@ -19,9 +19,7 @@ import {
 import {
   ChatMessageListQueryDto,
   ChatMessageListResponseDto,
-  ChatStreamDeltaEventDto,
-  ChatStreamEndEventDto,
-  ChatStreamStartEventDto,
+  ChatStreamEventDto,
   SendChatMessageRequestDto,
   SendChatMessageResponseDto,
 } from './dtos/chat-message.dto';
@@ -76,8 +74,9 @@ export class ChatController {
     @GetAuthUser() authUser: AuthUser,
     @Param('sessionId') sessionId: string,
     @Body() dto: SendChatMessageRequestDto,
+    @Headers('x-agent-mock-scenario') mockScenario?: string,
   ): Promise<SendChatMessageResponseDto> {
-    return this.chatService.sendMessage(authUser, sessionId, dto);
+    return this.chatService.sendMessage(authUser, sessionId, dto, { mockScenario });
   }
 
   @Post('sessions/:sessionId/messages/stream')
@@ -88,51 +87,48 @@ export class ChatController {
   @ApiResponse({
     status: 201,
     description:
-      'SSE 이벤트(message.start, message.delta, message.end, done)를 순차 전송합니다.',
-    type: ChatStreamStartEventDto,
+      'SSE 이벤트(message.start, message.delta, message.end, intent.result, done, error)를 upstream에서 받아 그대로 전송합니다.',
+    type: ChatStreamEventDto,
   })
   async streamMessage(
     @GetAuthUser() authUser: AuthUser,
     @Param('sessionId') sessionId: string,
     @Body() dto: SendChatMessageRequestDto,
+    @Headers('x-agent-mock-scenario') mockScenario: string | undefined,
     @Res() response: Response,
   ): Promise<void> {
-    const result = await this.chatService.sendMessageForStream(authUser, sessionId, dto);
-    const chunks = this.chatService.tokenizeForStream(result.assistantMessage.content);
+    const abortController = new AbortController();
+    const abortUpstream = (): void => {
+      if (!abortController.signal.aborted) {
+        abortController.abort();
+      }
+    };
 
     response.status(201);
     response.setHeader('Content-Type', 'text/event-stream');
     response.setHeader('Cache-Control', 'no-cache');
     response.setHeader('Connection', 'keep-alive');
+    response.setHeader('X-Accel-Buffering', 'no');
     response.flushHeaders();
 
-    const startEvent: ChatStreamStartEventDto = {
-      messageId: result.assistantMessage.id,
-      sessionId,
-    };
-    response.write(`event: message.start\n`);
-    response.write(`data: ${JSON.stringify(startEvent)}\n\n`);
+    response.on('close', abortUpstream);
+    response.on('finish', abortUpstream);
 
-    for (const chunk of chunks) {
-      const deltaEvent: ChatStreamDeltaEventDto = { text: chunk };
-      response.write(`event: message.delta\n`);
-      response.write(`data: ${JSON.stringify(deltaEvent)}\n\n`);
-      await this.delay(25);
+    try {
+      await this.chatService.sendMessageForStream(authUser, sessionId, dto, {
+        signal: abortController.signal,
+        mockScenario,
+        onEvent: (event) => {
+          response.write(`event: ${event.type}\n`);
+          response.write(`data: ${JSON.stringify(event.data)}\n\n`);
+        },
+      });
+    } finally {
+      response.off('close', abortUpstream);
+      response.off('finish', abortUpstream);
+      if (!response.writableEnded) {
+        response.end();
+      }
     }
-
-    const endEvent: ChatStreamEndEventDto = {
-      messageId: result.assistantMessage.id,
-      fullText: result.assistantMessage.content,
-      modelName: result.assistantMessage.modelName,
-    };
-    response.write(`event: message.end\n`);
-    response.write(`data: ${JSON.stringify(endEvent)}\n\n`);
-    response.write(`event: done\n`);
-    response.write(`data: {}\n\n`);
-    response.end();
-  }
-
-  private async delay(ms: number): Promise<void> {
-    await new Promise<void>((resolve) => setTimeout(resolve, ms));
   }
 }

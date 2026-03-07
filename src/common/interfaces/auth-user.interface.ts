@@ -5,4 +5,5 @@ export interface AuthUser {
   scopes: string[];
   tokenType: 'access';
   jti: string;
+  localDevToken?: boolean;
 }

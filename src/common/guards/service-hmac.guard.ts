@@ -9,6 +9,7 @@ import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../../shared/database/prisma.service';
 import { RedisService } from '../../shared/redis/redis.service';
 import { AuthServicePrincipal } from '../interfaces/auth-service.interface';
+import { isLocalAuthBypassEnabled } from '../utils/local-auth.util';
 
 interface HmacRequestShape {
   method: string;
@@ -29,6 +30,16 @@ export class ServiceHmacGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<HmacRequestShape>();
+
+    if (isLocalAuthBypassEnabled(this.configService)) {
+      request.serviceAuth = {
+        serviceId: request.headers['x-dev-service-id'] ?? 'local-service',
+        serviceCode: request.headers['x-dev-service-code'] ?? 'local-service',
+        keyId: 'local-auth-bypass',
+      };
+      return true;
+    }
+
     const keyId = request.headers['x-key-id'];
     const timestamp = request.headers['x-timestamp'];
     const nonce = request.headers['x-nonce'];

@@ -122,7 +122,26 @@ npm run start:dev
 
 - `chat/reply`를 우선 호출합니다.
 - `chat/reply`가 `404`, `405`, `501`을 반환하면 임시로 `intent/detect`로 폴백합니다.
+- `POST /api/v1/chat/sessions/:sessionId/messages/stream`는 upstream `node-agent-server`의 streaming endpoint를 호출하고 SSE 이벤트를 그대로 relay 합니다.
+- stream 응답은 `message.start`, `message.delta`, `message.end`, `intent.result`, `intent.error`, `done`, `error` 이벤트를 사용할 수 있습니다.
+- stream 경로에서는 user message를 먼저 저장하고, assistant message는 upstream 완료 후 저장합니다.
 - 서버 간 요청 서명은 HMAC 헤더 기반입니다.
+
+## SSE 테스트
+
+로컬에서는 `node-agent-server` mock 시나리오를 이용해 실제 LLM 호출 없이 SSE relay를 검증할 수 있습니다.
+
+예시 헤더:
+
+- `x-agent-mock-scenario: weather_success`
+- `x-agent-mock-scenario: stream_error`
+
+권장 순서:
+
+1. `POST /api/v1/auth/dev/token`으로 개발 토큰 발급
+2. `POST /api/v1/chat/sessions`로 세션 생성
+3. `POST /api/v1/chat/sessions/:sessionId/messages/stream` 호출
+4. `Accept: text/event-stream`와 `x-agent-mock-scenario` 헤더로 SSE 이벤트 확인
 
 ## 기술 스택
 
